@@ -6,23 +6,23 @@ from flask import Flask, jsonify
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from config import API_ID, API_HASH, SESSION_STRING, ADMINS, APP_URL, PORT
+from config import API_ID, API_HASH, BOT_TOKEN, ADMINS, APP_URL, PORT
 from database import Database
 from forwarder import ForwarderEngine
 
-# ----------------- LOGGING SETUP ----------------- #
+# Logging Setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("MainBot")
 
-# ----------------- KEEP-ALIVE FLASK ENGINE ----------------- #
+# Keep-Alive Web Server
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return jsonify({"status": "online", "message": "Render Keep-Alive Active!"}), 200
+    return jsonify({"status": "online", "message": "Render Keep-Alive Web Server Active!"}), 200
 
 @web_app.route('/health')
 def health():
@@ -52,34 +52,32 @@ async def self_ping_loop(app_url: str, interval: int = 300):
 
             await asyncio.sleep(interval)
 
-# ----------------- TELEGRAM CLIENT INIT ----------------- #
-if not SESSION_STRING:
-    logger.critical("❌ SESSION_STRING गायब है! Render पर चलाने के लिए SESSION_STRING अनिवार्य है।")
+# Telegram Bot Client Init
+if not BOT_TOKEN:
+    logger.critical("❌ BOT_TOKEN गायब है! कृपया config.py या Environment Variable में BOT_TOKEN डालें।")
     exit(1)
 
-app = Client("auto_forwarder_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
+app = Client("auto_forwarder_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 db = Database()
 engine = ForwarderEngine(app, db)
 
-# ----------------- BOT COMMANDS ----------------- #
+# ----------------- BOT COMMANDS IN BOT INBOX ----------------- #
 
-@app.on_message(filters.command("start") & filters.me)
+@app.on_message(filters.command("start") & filters.private)
 async def start_cmd(client: Client, message: Message):
     welcome_text = (
-        "🤖 **Auto-Forwarder Engine is Active!**\n\n"
-        "यह यूजरबॉट Render पर **Self-Ping (24/7 Awake)** के साथ एक्टिव है।\n\n"
-        "🌐 **सपोर्टेड राउटिंग प्रकार:**\n"
-        "• Channel ➔ Channel\n"
-        "• Group ➔ Group\n"
-        "• Topic Group ➔ Topic Group (Specific Topic Thread ID)\n"
-        "• Channel ➔ Topic Group\n\n"
+        f"👋 **नमस्ते {message.from_user.first_name}!**\n\n"
+        "🤖 **मैं आपका Auto-Forwarder Telegram Bot हूँ!**\n"
+        "मैं Render पर **Self-Ping (24/7 Alive)** के साथ चल रहा हूँ।\n\n"
+        "⚙️ **ज़रूरी स्टेप:**\n"
+        "मुझे Source Channel/Group और Target Channel/Group दोनों में **Admin** बनाएं।\n\n"
         "🛠 **कमांड्स:**\n"
-        "• `/add_task <source_id> <target_id> [topic_id]` - लाइव ऑटो-फॉरवर्ड टास्क जोड़ें\n"
+        "• `/add_task <source_id> <target_id> [topic_id]` - नया लाइव टास्क जोड़ें\n"
         "• `/range_forward <source_id> <target_id> <start_id> <end_id> [topic_id]` - पुराने मैसेज फॉरवर्ड करें"
     )
     await message.reply_text(welcome_text)
 
-@app.on_message(filters.command("add_task") & filters.me)
+@app.on_message(filters.command("add_task") & filters.user(ADMINS))
 async def add_task_cmd(client: Client, message: Message):
     args = message.command[1:]
     if len(args) < 2:
@@ -91,9 +89,15 @@ async def add_task_cmd(client: Client, message: Message):
     topic_id = int(args[2]) if len(args) > 2 else None
 
     task_id = await db.add_task(source_id, target_id, target_topic_id=topic_id)
-    await message.reply_text(f"✅ **Task Added!**\n• Task ID: `{task_id}`\n• Source: `{source_id}`\n• Target: `{target_id}`\n• Topic ID: `{topic_id or 'None'}`")
+    await message.reply_text(
+        f"✅ **Task Added Successfully!**\n\n"
+        f"• Task ID: `{task_id}`\n"
+        f"• Source ID: `{source_id}`\n"
+        f"• Target ID: `{target_id}`\n"
+        f"• Topic ID: `{topic_id or 'None'}`"
+    )
 
-@app.on_message(filters.command("range_forward") & filters.me)
+@app.on_message(filters.command("range_forward") & filters.user(ADMINS))
 async def range_forward_cmd(client: Client, message: Message):
     args = message.command[1:]
     if len(args) < 4:
@@ -111,28 +115,27 @@ async def range_forward_cmd(client: Client, message: Message):
 
 # ----------------- REALTIME EVENT LISTENER ----------------- #
 
-@app.on_message(~filters.me & ~filters.private)
+@app.on_message(~filters.private)
 async def realtime_listener(client: Client, message: Message):
     await engine.handle_incoming_message(message)
 
 # ----------------- MAIN RUNNER ----------------- #
 
 async def main():
-    # 1. Initialize DB
     await db.init()
 
-    # 2. Start Web Server in Background Thread
+    # Web Server स्टार्ट करें (Render Port Requirement)
     t = Thread(target=run_flask_server, args=(PORT,), daemon=True)
     t.start()
     logger.info(f"🌐 Keep-Alive Web Server listening on port {PORT}")
 
-    # 3. Start Pyrogram Client
+    # Bot स्टार्ट करें
     await app.start()
     logger.info("==========================================")
     logger.info("🤖 Auto Forwarder Bot Started Successfully!")
     logger.info("==========================================")
 
-    # 4. Start Self-Ping Engine (Prevents Render Sleep)
+    # Self-Ping Loop स्टार्ट करें
     if APP_URL:
         asyncio.create_task(self_ping_loop(APP_URL, interval=300))
 
