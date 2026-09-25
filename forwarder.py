@@ -39,31 +39,31 @@ class ForwarderEngine:
             elif custom_footer and not message.text:
                 caption = custom_footer
 
-            # 1. Text Only Message
+            # 1. Text Message
             if message.text:
                 text_content = message.text + (f"\n\n{custom_footer}" if custom_footer else "")
                 await self.app.send_message(
                     chat_id=target_chat,
                     text=text_content,
-                    message_thread_id=topic_id  # Topic support!
+                    message_thread_id=topic_id  # Topic Group Thread ID
                 )
 
-            # 2. All Media / Audio / Video / Docs / Stickers / Photos
+            # 2. Files / Media (Video, Audio, Docs, Photos, Voice, Stickers etc.)
             else:
                 await message.copy(
                     chat_id=target_chat,
                     caption=caption,
-                    message_thread_id=topic_id  # Topic support!
+                    message_thread_id=topic_id  # Topic Group Thread ID
                 )
 
-            logger.info(f"✅ Forwarded Msg {message.id} -> Chat {target_chat} (Topic Thread: {topic_id})")
+            logger.info(f"✅ [BOT] Forwarded Msg {message.id} -> Chat {target_chat} (Topic Thread: {topic_id})")
 
         except FloodWait as e:
-            logger.warning(f"⏳ FloodWait triggered. Sleeping for {e.value} seconds...")
+            logger.warning(f"⏳ Rate limit hit. Sleeping for {e.value} seconds...")
             await asyncio.sleep(e.value)
             await self.forward_message(message, task)
         except Exception as e:
-            logger.error(f"❌ Forward error for Msg {message.id}: {e}")
+            logger.error(f"❌ Bot Forwarding error for Msg {message.id}: {e}")
 
     async def handle_incoming_message(self, message: Message):
         source_id = message.chat.id
@@ -91,6 +91,6 @@ class ForwarderEngine:
                 msg = await self.app.get_messages(source_id, msg_id)
                 if msg and not msg.empty and self.is_valid_media(msg, filter_type):
                     await self.forward_message(msg, task)
-                    await asyncio.sleep(2.5)  # Telegram Safe Limit Delay
+                    await asyncio.sleep(2.5)
             except Exception as e:
                 logger.error(f"Error fetching Msg {msg_id}: {e}")
